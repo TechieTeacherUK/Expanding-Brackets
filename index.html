@@ -294,6 +294,7 @@
       <label class="chip"><input type="radio" name="topic" value="expand"><span>Expanding one bracket</span></label>
       <label class="chip"><input type="radio" name="topic" value="expandSimplify"><span>Expand and simplify</span></label>
       <label class="chip"><input type="radio" name="topic" value="double"><span>Double brackets</span></label>
+      <label class="chip"><input type="radio" name="topic" value="multi"><span>Triple & quadruple brackets</span></label>
       <label class="chip"><input type="radio" name="topic" value="factorise"><span>Factorising</span></label>
     </div>
     <div class="row" role="radiogroup" aria-labelledby="lblLevel" id="levelGroup">
@@ -383,6 +384,7 @@ function peq(a, b) {
   return true;
 }
 const psum = arr => arr.reduce(padd, {});
+function polyToTermList(poly) { return Object.keys(poly).sort(cmpKeys).map(k => ({ [k]: poly[k] })); }
 const isSingle = p => Object.keys(p).length === 1;
 const coefOf = p => p[Object.keys(p)[0]];
 const degree = k => Object.values(keyToMap(k)).reduce((a, b) => a + b, 0);
@@ -747,6 +749,71 @@ function genDouble(level) {
   };
 }
 
+function genMultiBrackets(level) {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    let brackets;
+    if (level === 1) {
+      brackets = Array.from({ length: 3 }, () => [pvar("x"), pconst(rnd(1, 6))]);
+    } else if (level === 2) {
+      brackets = Array.from({ length: 3 }, () => [pvar("x"), pconst(nz(-7, 7))]);
+    } else {
+      const count = pick([3, 4, 4]);
+      brackets = Array.from({ length: count }, () => {
+        const coeff = (count === 4 && chance(0.25)) ? rnd(2, 3) : 1;
+        return [M(coeff, "x"), M(nz(-8, 8), "")];
+      });
+    }
+
+    let ansMap = pconst(1);
+    brackets.forEach(b => { ansMap = pmul(ansMap, psum(b)); });
+    if (Object.values(ansMap).some(c => Math.abs(c) > 400)) continue;
+    if (Object.keys(ansMap).length < 2) continue;
+
+    const steps = [];
+    let current = brackets[0].slice();
+    let lastSum = null;
+
+    for (let i = 1; i < brackets.length; i++) {
+      const B = brackets[i];
+      const products = [];
+      const lines = [];
+      current.forEach(a => B.forEach(b => { products.push(pmul(a, b)); lines.push({ m: `${wrapNeg(a)} * ${wrapNeg(b)} = ${pstr(pmul(a, b))}` }); }));
+      const sumMap = psum(products);
+      steps.push({
+        title: i === 1 ? "Multiply the first two brackets" : "Multiply by the next bracket",
+        text: i === 1
+          ? `Multiply every term in ${tok("(" + joinTerms(brackets[0]) + ")")} by every term in ${tok("(" + joinTerms(brackets[1]) + ")")}. That's four multiplications, just like a double bracket.`
+          : `Take the simplified result so far and multiply every term in it by every term in ${tok("(" + joinTerms(B) + ")")}.`,
+        lines
+      });
+      steps.push({
+        title: "Collect like terms before moving on",
+        text: "Add up any terms of the same type, so the expression stays as simple as possible before the next multiplication.",
+        lines: [`${joinTerms(products)} = ${pstr(sumMap)}`]
+      });
+      lastSum = sumMap;
+      current = polyToTermList(sumMap);
+    }
+
+    const mistakes = [];
+    if (brackets.length > 2) {
+      let partial = pconst(1);
+      for (let i = 0; i < brackets.length - 1; i++) partial = pmul(partial, psum(brackets[i]));
+      mistakes.push({ poly: partial, msg: "It looks like the last bracket didn't get multiplied in. Keep going until every bracket has been used, multiplying the running result by the next bracket each time." });
+    }
+
+    return {
+      kind: "expand",
+      prompt: brackets.length === 3 ? "Expand these three brackets, then simplify." : "Expand these four brackets, then simplify.",
+      expr: brackets.map(b => "(" + joinTerms(b) + ")").join(""),
+      answerPoly: ansMap, answerStr: pstr(ansMap), steps, mistakes,
+      example: brackets.length === 3 ? "x^3 + 6x^2 + 11x + 6" : "x^4 + 10x^3 + 35x^2 + 50x + 24"
+    };
+  }
+  throw new Error("could not make multi-bracket question");
+}
+
+
 function factoriseSolution(expr) {
   const keys = Object.keys(expr).sort(cmpKeys);
   const terms = keys.map(k => ({ [k]: expr[k] }));
@@ -800,9 +867,9 @@ function genFactorise(level) {
   throw new Error("could not make factorise question");
 }
 
-const TOPICS = ["collect", "expand", "expandSimplify", "double", "factorise"];
-const GEN = { collect: genCollect, expand: genExpand, expandSimplify: genExpandSimplify, double: genDouble, factorise: genFactorise };
-const TOPIC_NAME = { collect: "Collecting like terms", expand: "Expanding one bracket", expandSimplify: "Expand and simplify", double: "Double brackets", factorise: "Factorising" };
+const TOPICS = ["collect", "expand", "expandSimplify", "double", "multi", "factorise"];
+const GEN = { collect: genCollect, expand: genExpand, expandSimplify: genExpandSimplify, double: genDouble, multi: genMultiBrackets, factorise: genFactorise };
+const TOPIC_NAME = { collect: "Collecting like terms", expand: "Expanding one bracket", expandSimplify: "Expand and simplify", double: "Double brackets", multi: "Triple & quadruple brackets", factorise: "Factorising" };
 
 /* ---------- checking an answer ---------- */
 function splitFactors(s) {
